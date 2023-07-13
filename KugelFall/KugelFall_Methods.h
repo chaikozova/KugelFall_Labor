@@ -118,7 +118,7 @@ bool hallFALLING() {
 
   Returns:
   -----------
-  return: True if the hole is in the lower part of the disc, false if it is in the upper part.
+  return: True if the hole is in the lower part of the disc, false otherwiese.
 
   Hall Sensor:
   ------------
@@ -152,7 +152,7 @@ bool hallRISING() {
 
   Returns:
   ----------
-  return: True if the hole is in the upper part of the disc, false if it is in the lower part.
+  return: True if the hole is in the upper part of the disc, false otherwiese.
 
   Hall Sensor:
   ------------
@@ -276,15 +276,16 @@ void show_speed_state(int state) {
 
 int abwurf_calc() {
   /*
-  Calculates the parameters for ball release based on the time difference between the current time and the previous time.
+  Calculates the time parameters required for releasing a ball based on the time difference between the current time and the previous time.
 
   Returns:
   --------
-  int:
-      - 3: Fast rotation mode.
-      - 2: Middle rotation mode.
-      - 1: Slow rotation mode.
-  
+  The function returns an integer that indicates the rotation mode. The possible values are:
+
+    - 3: Fast rotation mode.
+    - 2: Middle rotation mode.
+    - 1: Slow rotation mode.
+
   Global Variables:
   ----------------
   t_u: Time difference between the current time and the previous time. (current rotation time)
@@ -296,32 +297,39 @@ int abwurf_calc() {
   pred: Predicted time for the next rotation.
   c: Delta coefficient for dropping time correction.
 
+
   Explanation:
   ------------
   This function calculates the time parameters required for releasing a ball based on the time difference (t_u) between the current time and the previous time.
 
-  - Fast Rotation Mode:
-    - If t_u < 450ms, the function predicts the next rotation time (pred) based on t_u.
-    - abwurf_time_min is calculated by adding pred, the predicted time for the rotation after next, and the time difference between the current time and the ball falling time (now_time - fall_time).
-    - abwurf_time_max is calculated as abwurf_time_min multiplied by a hole factor.
-    - abwurf_time_min is adjusted by subtracting a 1/4 of t_u (current rotation time).
+  The function works in three modes:
 
-  - Slow Rotation Mode:
-    - If t_u > 2000ms, the function predicts the next rotation time (pred) based on t_u.
-    - abwurf_time_min is calculated by adding t_u and the time difference between the current time and the ball falling time (now_time - fall_time).
-    - c is calculated by mapping t_u from 2000 to 5000 to the range -0.01 to 0.07 using the map_float function.
-    - abwurf_time_min is adjusted by adding t_u multiplied by c.
-    - abwurf_time_max is calculated as abwurf_time_min multiplied by a hole factor.
+    - Fast rotation mode: (rotation time less than 450 ms)
+        - The minimum time for ball release (abwurf_time_min) is calculated by adding 
+                    the predicted time for the next rotation, 
+                    the predicted time for the rotation after next 
+                    and the time required for the ball to reach the hole after it is released. 
+        - The maximum time for ball release (abwurf_time_max) is calculated by multiplying abwurf_time_min by a hole factor.
+    
+    - Slow rotation mode: (rotation time is greater than 2000 ms)
+        - The function calculates abwurf_time_min (the minimum time for ball release) 
+                    by adding current rotation time (t_u) 
+                    to the time difference between the current time and the ball falling time (now_time - fall_time). 
+        - The correction coefficient (c) is calculated by mapping t_u from 2000 to 5000 to the range -0.01 to 0.07 
+                    using the map_float function. 
+        - abwurf_time_min is adjusted by adding t_u multiplied by c. 
+        - abwurf_time_max is calculated by multiplying abwurf_time_min by a hole factor.
 
-  - Middle Rotation Mode:
-    - For 450ms ≤ t_u ≤ 2000ms, the function predicts the next rotation time (pred) based on t_u.
-    - abwurf_time_min is calculated by adding pred and the time difference between the current time and the ball falling time (now_time - fall_time).
-    - abwurf_time_max is calculated as abwurf_time_min multiplied by a hole factor.
-    - c is calculated by mapping t_u from 450 to 2000 to the range -0.19 to 0.039 using the map_float function.
-    - abwurf_time_min is adjusted by adding c multiplied by t_u.
-
-  The function returns the corresponding rotation mode: 3 for fast, 2 for middle, and 1 for slow.
-*/
+    - Middle rotation mode: (rotation time between 450 ms and 2000 ms)
+        - The function calculates abwurf_time_min (the minimum time for ball release)
+                    by adding the predicted time for the next rotation (pred)
+                    to the time difference between the current time and the ball falling time (now_time - fall_time). 
+        - The delta coefficient (c) is calculated by mapping t_u from 450 to 2000 to the range -0.19 to 0.039 
+                    using the map_float function. 
+        - abwurf_time_min is adjusted by adding t_u multiplied by c.
+        - abwurf_time_max is calculated by multiplying abwurf_time_min by a hole factor.
+  
+  */
 
 
   t_u = now_time - old_time;
@@ -356,15 +364,32 @@ int abwurf_calc() {
 
 
 void algorithm() {
-
   /*
+
   Performs the algorithmic operations for the ball throwing mechanism.
   This function is responsible for controlling the timing and behavior of the system.
+
+  Args:
+    now_time_loop: The current time in milliseconds.
+    photoTimeOld: The previous value of photoTimeNew.
+    photoTimeNew: The current value of photoTimeNew.
+    errorState: The error state of the system.
+    abwurfState: The ball release state.
+    isTriggered: The state of the trigger button.
+    speed_state: The rotation speed state.
+    counter: The counter for skipping calculations.
+    loop_end: The end time of the loop.
+
+  Returns:
+  ---------
+    None.
+
   */
+
 
   now_time_loop = millis();
 
-  // check for sudden changes in the behaviour of the system
+  // Check for sudden changes in the behavior of the system.
   if (photoChange()) {
     photoTimeOld = photoTimeNew;    // Store the previous photoTimeNew value
     photoTimeNew = now_time_loop;   // Update photoTimeNew with the current time
@@ -384,12 +409,20 @@ void algorithm() {
     now_time = millis();
     speed_state = abwurf_calc();
     counter++;
+    
     // skip some calculations due to servo-sensor interference
     if (counter % speed_state == 0) {
       abwurfState = true;
     }
   }
 
+  /* Show the rotation speed state.
+  Fast rotation mode - Green LED is on, 
+  Middle rotation mode - Yellow LED is on, 
+  Slow rotation mode - both LEDs are on
+  Error state - both LEDs are off
+
+  */
   show_speed_state(speed_state);
 
   loop_end = millis();
