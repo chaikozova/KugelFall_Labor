@@ -27,6 +27,10 @@ long int t_u;
 long int now_time_loop = 0;
 long int loop_end = 0;
 long int pred = 0;
+long int t_error = 0;
+long photoTimeNew, photoTimeOld;
+int d_t = 0;
+
 
 
 // Control variables
@@ -35,13 +39,11 @@ bool hallStateFalling = true;  // Check for the hole position, true if the hole 
 bool hallStateRISING = false;  // Check for the hole position, true if the hole is located in the lower part of the disc
 int counter = 0;               // Helper variable to make sure that we wait a few rounds before throwing a ball
 int speed_state = 0;           // Speed state: 3=fast, 2=middle, 1=slow, -1=Error
-float delta_error = 0.5;       // Amount of milliseconds the prediction can differ from the real time
+float delta_error = 0.2;       // Percentage the prediction can differ from the real time
+bool trigger_state = false;    // Check if the trigger Button was pressed
+bool errorState;               // Check if there is an error state.
+bool photoState;               // Check if the sensor available for use
 
-
-int d_t = 0;
-bool errorState;
-bool photoState;
-long photoTimeNew, photoTimeOld;
 
 
 float map_float(double value, double fromLow, double fromHigh, float toLow, float toHigh) {
@@ -96,16 +98,14 @@ float time_prediction(long int t_u) {
   return ((-360 * t_u) / ((t_u * mu) - 360));
 }
 
-bool isTriggered() {
+void isTriggered() {
   /*
     Checks if the trigger button on the handheld control is being pressed.
-
-    Returns
-    -------
-    return : True if the button is being pressed, false otherwise.
-    */
-
-  return (digitalRead(triggerPin));
+  */
+  if (trigger_state == false){
+      trigger_state = (digitalRead(triggerPin));
+  }
+  
 }
 
 
@@ -214,7 +214,27 @@ void release() {
 
 
 bool check_system(long d_t, float pos, int min, int max) {
-  // error state
+  /*
+  This function checks if the difference between the predicted time and the actual rotation time is within an acceptable range. 
+  The acceptable range is up to 1/24th of a rotation. 
+  If the difference is outside this range, it means that there are external disturbances, such as forced acceleration or deceleration.
+  The function also checks if the rotation is not too fast or too slow.
+
+  Parameters:
+  ------------
+
+  d_t: The current rotation time, in units of 1/12 of a rotation. This is detected and calculated with the help of a photosensor.
+  pos: The current position, in units of 1/12 of a rotation. This is used to calculate the predicted time for the current position.
+  min: The minimum allowed time for 1/12 of a rotation. This is used to check if the rotation is not too slow.
+  max: The maximum allowed time for 1/12 of a rotation. This is used to check if the rotation is not too fast.
+
+  Returns:
+  ----------
+  True if the difference between the actual and predicted times is within the acceptable range 
+          and the rotation is not too fast or too slow.
+  False otherwise.
+  */
+  
   if (abs(d_t - (pred * pos)) > delta_error * (pred * pos) || (d_t < min) || (d_t > max)) {  //
 
     abwurfState = false;
@@ -291,10 +311,11 @@ int abwurf_calc() {
   t_u: Time difference between the current time and the previous time. (current rotation time)
   now_time: Current time.
   old_time: Previous time.
+  pred: Predicted time for the next rotation.
+  t_error: The difference between prediction time and the actual rotation time
   fall_time: Time required for the ball to reach the hole after it is released.
   abwurf_time_min: Minimum time for ball release.
   abwurf_time_max: Maximum time for ball release.
-  pred: Predicted time for the next rotation.
   c: Delta coefficient for dropping time correction.
 
 
@@ -308,56 +329,64 @@ int abwurf_calc() {
         - The minimum time for ball release (abwurf_time_min) is calculated by adding 
                     the predicted time for the next rotation, 
                     the predicted time for the rotation after next 
-                    and the time required for the ball to reach the hole after it is released. 
-        - The maximum time for ball release (abwurf_time_max) is calculated by multiplying abwurf_time_min by a hole factor.
+                    and the time required for the ball to reach the hole after it is released 
+                    and difference between prediction time and current rotation time x2 (for both prediction times). 
+        - The maximum time for ball release (abwurf_time_max) is calculated by adding 30 ms.
     
     - Slow rotation mode: (rotation time is greater than 2000 ms)
         - The function calculates abwurf_time_min (the minimum time for ball release) 
                     by adding current rotation time (t_u) 
-                    to the time difference between the current time and the ball falling time (now_time - fall_time). 
+                    to the time difference between the current time and the ball falling time (now_time - fall_time)
+                    and difference between prediction time and current rotation time minus 45ms (loop time). 
         - The correction coefficient (c) is calculated by mapping t_u from 2000 to 5000 to the range -0.01 to 0.07 
                     using the map_float function. 
         - abwurf_time_min is adjusted by adding t_u multiplied by c. 
-        - abwurf_time_max is calculated by multiplying abwurf_time_min by a hole factor.
+        - abwurf_time_max is calculated by adding 30 ms.
 
     - Middle rotation mode: (rotation time between 450 ms and 2000 ms)
         - The function calculates abwurf_time_min (the minimum time for ball release)
                     by adding the predicted time for the next rotation (pred)
-                    to the time difference between the current time and the ball falling time (now_time - fall_time). 
+                    to the time difference between the current time and the ball falling time (now_time - fall_time)
+                    and difference between prediction time and current rotation time. 
         - The delta coefficient (c) is calculated by mapping t_u from 450 to 2000 to the range -0.19 to 0.039 
                     using the map_float function. 
         - abwurf_time_min is adjusted by adding t_u multiplied by c.
-        - abwurf_time_max is calculated by multiplying abwurf_time_min by a hole factor.
+        - abwurf_time_max is calculated  by adding 30 ms.
   
   */
 
 
   t_u = now_time - old_time;
   pred = time_prediction(t_u);
+  t_error = t_u - pred;
 
   //fast
   if (t_u < 450) {
-    abwurf_time_min = round(pred + time_prediction(pred) + now_time - fall_time);
-    abwurf_time_max = round(abwurf_time_min * hole_factor);
-    abwurf_time_min = abwurf_time_min - round((3 * t_u / 12));
+    abwurf_time_min = round(pred + time_prediction(pred) + now_time - fall_time + 2.1 * t_error); //2.1 because 2*error is not enough calc pred twice --> error*2
+    
+    abwurf_time_min = abwurf_time_min - round((3.0 * t_u / 12.0));
+    abwurf_time_max = round(abwurf_time_min + 30);
+    pred = pred + t_error;
     return 3;
   }
 
   //slow
   if (t_u > 2000) {
-    abwurf_time_min = round(t_u + now_time - fall_time);
-    c = map_float(t_u, 2000, 5000, -0.01, 0.07);
-    abwurf_time_min = abwurf_time_min + round(t_u * c);
-    abwurf_time_max = round(abwurf_time_min * hole_factor);
+    abwurf_time_min = round(t_u + now_time - fall_time - 45 + t_error);
+    //c = map_float(t_u, 2000, 5000, -0.01, 0.07);
+    //abwurf_time_min = abwurf_time_min + round(t_u * c);
+    abwurf_time_max = round(abwurf_time_min + 30);
+    pred = pred + t_error;
     return 1;
   }
 
   //middle
   else {
-    abwurf_time_min = round(pred + now_time - fall_time);
-    abwurf_time_max = round(abwurf_time_min * hole_factor);
+    abwurf_time_min = round(pred + now_time - fall_time + t_error);
     c = map_float(t_u, 450, 2000, -0.19, 0.039);
-    abwurf_time_min = abwurf_time_min + round(c * t_u);
+    abwurf_time_min = abwurf_time_min + round(c * t_u + 1.0/48.0 * t_u);
+    abwurf_time_max = round(abwurf_time_min + 30);
+    pred = t_error + pred;
     return 2;
   }
 }
@@ -386,21 +415,22 @@ void algorithm() {
 
   */
 
-
   now_time_loop = millis();
 
   // Check for sudden changes in the behavior of the system.
   if (photoChange()) {
     photoTimeOld = photoTimeNew;    // Store the previous photoTimeNew value
     photoTimeNew = now_time_loop;   // Update photoTimeNew with the current time
-    // Evaluate system errors
-    errorState = check_system((photoTimeNew - photoTimeOld), (1 / 12), (333 / 12), (5000 / 12));
+    // Evaluate system errors and set errorState
+    errorState = check_system((photoTimeNew - photoTimeOld), (1.0 / 12.0), (333 / 12), (5000 / 12));
   }
 
   // Check if it's time for ball release and if conditions are met
-  if (now_time_loop > abwurf_time_min && now_time_loop < abwurf_time_max && abwurfState && isTriggered && errorState) {
-    release();            // Open the mechanism to release the ball
-    abwurfState = false;  // Update the ball release state
+  if (now_time_loop > abwurf_time_min && now_time_loop < abwurf_time_max && abwurfState && trigger_state && errorState) {
+
+    release();              // Open the mechanism to release the ball
+    abwurfState = false;    // Update the ball release state
+    trigger_state = false;  // Update the trigger state
   }
 
   // Check if the hole is in the falling position
@@ -424,8 +454,9 @@ void algorithm() {
 
   */
   show_speed_state(speed_state);
+  isTriggered();
+  loop_end = micros();
 
-  loop_end = millis();
 }
 
 
